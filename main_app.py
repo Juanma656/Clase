@@ -9,26 +9,23 @@ import matplotlib.pyplot as plt
 # Configuración general
 # ======================
 st.set_page_config(
-    page_title="EDA Dashboard Universal",
+    page_title="EDA Dashboard Dinámico",
     layout="wide"
 )
 
-st.title("📊 Dashboard EDA Universal")
-st.caption("Carga cualquier dataset y explóralo sin errores")
+st.title("📊 Dashboard EDA Dinámico")
+st.caption("Explora cualquier dataset de forma interactiva y segura")
 
 # ======================
-# Sidebar – carga de datos
+# Sidebar – Carga de datos
 # ======================
-st.sidebar.header("📂 Cargar datos")
+st.sidebar.header("📂 Datos")
 
 uploaded_file = st.sidebar.file_uploader(
-    "CSV o Excel",
+    "Cargar CSV o Excel",
     type=["csv", "xlsx"]
 )
 
-# ======================
-# Carga segura de datos
-# ======================
 @st.cache_data
 def safe_load(file):
     try:
@@ -40,11 +37,8 @@ def safe_load(file):
         else:
             df = pd.read_excel(file)
 
-        # Eliminar columnas completamente vacías
         df = df.dropna(axis=1, how="all")
-
         return df, None
-
     except Exception as e:
         return None, str(e)
 
@@ -53,183 +47,137 @@ if uploaded_file is None:
     st.stop()
 
 df, error = safe_load(uploaded_file)
-
 if error:
-    st.error("❌ Error al cargar el archivo")
+    st.error("Error al cargar el archivo")
     st.code(error)
     st.stop()
 
 # ======================
-# Preparación del dataset
+# Sidebar – Controles dinámicos
 # ======================
-df = df.copy()
+st.sidebar.header("🎛️ Controles")
 
-numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
-categorical_cols = df.select_dtypes(include=["object", "category", "bool"]).columns.tolist()
+max_rows = len(df)
+n_rows = st.sidebar.slider(
+    "Cantidad de muestras a analizar",
+    min_value=10,
+    max_value=max_rows,
+    value=min(500, max_rows),
+    step=10
+)
+
+sample_mode = st.sidebar.radio(
+    "Modo de muestreo",
+    ["Primeras filas", "Aleatorio"]
+)
+
+if sample_mode == "Aleatorio":
+    df_view = df.sample(n_rows, random_state=42)
+else:
+    df_view = df.head(n_rows)
+
+numeric_cols = df_view.select_dtypes(include=np.number).columns.tolist()
+categorical_cols = df_view.select_dtypes(include=["object", "category", "bool"]).columns.tolist()
 
 # ======================
-# KPIs principales
+# Sidebar – Opciones de vista
 # ======================
-st.subheader("📌 Resumen del Dataset")
+st.sidebar.header("🧭 Vistas")
+
+show_table = st.sidebar.checkbox("Mostrar tabla de datos", True)
+show_stats = st.sidebar.checkbox("Mostrar estadística descriptiva", True)
+show_graphs = st.sidebar.checkbox("Mostrar gráficos", True)
+show_corr = st.sidebar.checkbox("Mostrar correlaciones", False)
+
+view_mode = st.sidebar.selectbox(
+    "Modo de visualización",
+    ["Compacto", "Detallado"]
+)
+
+# ======================
+# KPIs
+# ======================
+st.subheader("📌 Resumen")
 
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Filas", df.shape[0])
-c2.metric("Columnas", df.shape[1])
+c1.metric("Filas analizadas", df_view.shape[0])
+c2.metric("Columnas", df_view.shape[1])
 c3.metric("Numéricas", len(numeric_cols))
 c4.metric("Categóricas", len(categorical_cols))
 
 st.divider()
 
 # ======================
-# Vista general
+# Vista de tabla
 # ======================
-with st.expander("📄 Vista previa", expanded=True):
-    st.dataframe(df.head(50), use_container_width=True)
+if show_table:
+    with st.expander("📄 Datos", expanded=view_mode == "Detallado"):
+        st.dataframe(df_view, use_container_width=True)
 
 # ======================
-# Navegación
+# Estadística descriptiva
 # ======================
-section = st.sidebar.radio(
-    "🧭 Sección",
-    [
-        "Análisis Cualitativo",
-        "Análisis Cuantitativo",
-        "Análisis Cuantitativo Gráfico"
-    ]
-)
-
-# ======================================================
-# ANÁLISIS CUALITATIVO
-# ======================================================
-if section == "Análisis Cualitativo":
-    st.subheader("🧩 Análisis Cualitativo")
-
-    if not categorical_cols:
-        st.warning("No hay variables categóricas disponibles")
-        st.stop()
-
-    cat_col = st.selectbox(
-        "Variable categórica",
-        categorical_cols
-    )
-
-    freq = (
-        df[cat_col]
-        .value_counts(dropna=False)
-        .reset_index()
-    )
-    freq.columns = ["Categoría", "Frecuencia"]
-
-    col1, col2 = st.columns([1, 2])
-
-    with col1:
-        st.dataframe(freq, use_container_width=True)
-
-    with col2:
-        fig = px.bar(
-            freq,
-            x="Categoría",
-            y="Frecuencia",
-            title=f"Distribución de {cat_col}"
+if show_stats and numeric_cols:
+    with st.expander("📐 Estadística descriptiva", expanded=view_mode == "Detallado"):
+        st.dataframe(
+            df_view[numeric_cols].describe().T,
+            use_container_width=True
         )
-        fig.update_layout(xaxis_tickangle=-45)
-        st.plotly_chart(fig, use_container_width=True)
 
-# ======================================================
-# ANÁLISIS CUANTITATIVO
-# ======================================================
-elif section == "Análisis Cuantitativo":
-    st.subheader("📐 Análisis Cuantitativo")
+# ======================
+# Gráficos dinámicos
+# ======================
+if show_graphs and numeric_cols:
+    st.subheader("📊 Gráficos interactivos")
 
-    if not numeric_cols:
-        st.warning("No hay variables numéricas disponibles")
-        st.stop()
-
-    num_col = st.selectbox(
-        "Variable numérica",
-        numeric_cols
+    selected_nums = st.multiselect(
+        "Selecciona variables numéricas",
+        numeric_cols,
+        default=numeric_cols[:1]
     )
 
-    series = df[num_col].dropna()
-
-    stats = pd.DataFrame({
-        "Métrica": [
-            "Media", "Mediana", "Desv. estándar",
-            "Mínimo", "Máximo",
-            "Asimetría", "Curtosis"
-        ],
-        "Valor": [
-            series.mean(),
-            series.median(),
-            series.std(),
-            series.min(),
-            series.max(),
-            series.skew(),
-            series.kurtosis()
-        ]
-    })
-
-    st.dataframe(stats, use_container_width=True)
-
-# ======================================================
-# ANÁLISIS CUANTITATIVO GRÁFICO
-# ======================================================
-elif section == "Análisis Cuantitativo Gráfico":
-    st.subheader("📊 Análisis Cuantitativo Gráfico")
-
-    if not numeric_cols:
-        st.warning("No hay variables numéricas disponibles")
-        st.stop()
-
-    selected = st.selectbox(
-        "Variable",
-        numeric_cols
-    )
-
-    col1, col2 = st.columns(2)
-
-    with col1:
+    for col in selected_nums:
         fig = px.histogram(
-            df,
-            x=selected,
+            df_view,
+            x=col,
             nbins=30,
             marginal="box",
-            title=f"Histograma de {selected}"
+            title=f"Distribución de {col}"
         )
         st.plotly_chart(fig, use_container_width=True)
 
-    with col2:
-        fig = px.box(
-            df,
-            y=selected,
-            title=f"Boxplot de {selected}"
-        )
-        st.plotly_chart(fig, use_container_width=True)
+# ======================
+# Scatter dinámico
+# ======================
+if show_graphs and len(numeric_cols) > 1:
+    st.subheader("🔗 Relación entre variables")
 
-    if len(numeric_cols) > 1:
-        st.divider()
-        st.subheader("🔗 Relación entre variables")
+    x_var = st.selectbox("Eje X", numeric_cols, index=0)
+    y_var = st.selectbox("Eje Y", numeric_cols, index=1)
 
-        x = st.selectbox("Eje X", numeric_cols, index=0)
-        y = st.selectbox("Eje Y", numeric_cols, index=1)
+    fig = px.scatter(
+        df_view,
+        x=x_var,
+        y=y_var,
+        trendline="ols",
+        title=f"{x_var} vs {y_var}"
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
-        fig = px.scatter(
-            df,
-            x=x,
-            y=y,
-            trendline="ols",
-            title=f"{x} vs {y}"
-        )
-        st.plotly_chart(fig, use_container_width=True)
+# ======================
+# Correlaciones
+# ======================
+if show_corr and len(numeric_cols) > 1:
+    st.subheader("🧠 Matriz de correlación")
 
-        corr = df[numeric_cols].corr()
+    corr = df_view[numeric_cols].corr()
 
-        fig, ax = plt.subplots(figsize=(10, 6))
-        sns.heatmap(
-            corr,
-            annot=True,
-            cmap="coolwarm",
-            fmt=".2f",
-            ax=ax
-        )
-        st.pyplot(fig)
+    fig, ax = plt.subplots(figsize=(10, 6))
+    sns.heatmap(
+        corr,
+        annot=view_mode == "Detallado",
+        cmap="coolwarm",
+        fmt=".2f",
+        ax=ax
+    )
+    st.pyplot(fig)
