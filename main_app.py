@@ -9,68 +9,66 @@ import matplotlib.pyplot as plt
 # Configuración general
 # ======================
 st.set_page_config(
-    page_title="Generador de Datos + EDA",
+    page_title="EDA Dashboard Universal",
     layout="wide"
 )
 
-st.title("🧪 Generador Universal de Datos + Dashboard EDA")
-st.caption("Crea cualquier dataset y explóralo visualmente")
+st.title("📊 Dashboard EDA Universal")
+st.caption("Carga cualquier dataset y explóralo sin errores")
 
 # ======================
-# Sidebar – Generador
+# Sidebar – carga de datos
 # ======================
-st.sidebar.header("⚙️ Configuración del Dataset")
+st.sidebar.header("📂 Cargar datos")
 
-n_rows = st.sidebar.slider("Número de filas", 50, 5000, 500)
-n_num = st.sidebar.slider("Variables numéricas", 1, 10, 3)
-n_cat = st.sidebar.slider("Variables categóricas", 0, 5, 1)
-dist_type = st.sidebar.selectbox(
-    "Distribución numérica",
-    ["Normal", "Uniforme"]
+uploaded_file = st.sidebar.file_uploader(
+    "CSV o Excel",
+    type=["csv", "xlsx"]
 )
 
-generate = st.sidebar.button("🚀 Generar Dataset")
-
 # ======================
-# Generación de datos
+# Carga segura de datos
 # ======================
 @st.cache_data
-def generate_data(n_rows, n_num, n_cat, dist_type):
-    data = {}
-
-    # Numéricas
-    for i in range(n_num):
-        if dist_type == "Normal":
-            data[f"num_{i+1}"] = np.random.normal(
-                loc=np.random.randint(10, 100),
-                scale=np.random.randint(5, 20),
-                size=n_rows
-            )
+def safe_load(file):
+    try:
+        if file.name.endswith(".csv"):
+            try:
+                df = pd.read_csv(file)
+            except UnicodeDecodeError:
+                df = pd.read_csv(file, encoding="latin-1")
         else:
-            data[f"num_{i+1}"] = np.random.uniform(
-                low=0,
-                high=np.random.randint(50, 200),
-                size=n_rows
-            )
+            df = pd.read_excel(file)
 
-    # Categóricas
-    for i in range(n_cat):
-        categories = [f"C{i+1}_{j}" for j in range(1, 6)]
-        data[f"cat_{i+1}"] = np.random.choice(categories, n_rows)
+        # Eliminar columnas completamente vacías
+        df = df.dropna(axis=1, how="all")
 
-    return pd.DataFrame(data)
+        return df, None
 
-if not generate:
-    st.info("⬅️ Configura el dataset y haz clic en **Generar Dataset**")
+    except Exception as e:
+        return None, str(e)
+
+if uploaded_file is None:
+    st.info("⬅️ Carga un archivo para comenzar")
     st.stop()
 
-df = generate_data(n_rows, n_num, n_cat, dist_type)
+df, error = safe_load(uploaded_file)
 
-numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
-categorical_cols = df.select_dtypes(include="object").columns.tolist()
+if error:
+    st.error("❌ Error al cargar el archivo")
+    st.code(error)
+    st.stop()
 
 # ======================
-# KPIs
+# Preparación del dataset
+# ======================
+df = df.copy()
+
+numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
+categorical_cols = df.select_dtypes(include=["object", "category", "bool"]).columns.tolist()
+
+# ======================
+# KPIs principales
 # ======================
 st.subheader("📌 Resumen del Dataset")
 
@@ -85,21 +83,41 @@ st.divider()
 # ======================
 # Vista general
 # ======================
-with st.expander("📄 Vista previa del dataset", expanded=True):
-    st.dataframe(df.head(20), use_container_width=True)
+with st.expander("📄 Vista previa", expanded=True):
+    st.dataframe(df.head(50), use_container_width=True)
 
 # ======================
-# Análisis Cualitativo
+# Navegación
 # ======================
-if categorical_cols:
+section = st.sidebar.radio(
+    "🧭 Sección",
+    [
+        "Análisis Cualitativo",
+        "Análisis Cuantitativo",
+        "Análisis Cuantitativo Gráfico"
+    ]
+)
+
+# ======================================================
+# ANÁLISIS CUALITATIVO
+# ======================================================
+if section == "Análisis Cualitativo":
     st.subheader("🧩 Análisis Cualitativo")
+
+    if not categorical_cols:
+        st.warning("No hay variables categóricas disponibles")
+        st.stop()
 
     cat_col = st.selectbox(
         "Variable categórica",
         categorical_cols
     )
 
-    freq = df[cat_col].value_counts().reset_index()
+    freq = (
+        df[cat_col]
+        .value_counts(dropna=False)
+        .reset_index()
+    )
     freq.columns = ["Categoría", "Frecuencia"]
 
     col1, col2 = st.columns([1, 2])
@@ -114,73 +132,104 @@ if categorical_cols:
             y="Frecuencia",
             title=f"Distribución de {cat_col}"
         )
+        fig.update_layout(xaxis_tickangle=-45)
         st.plotly_chart(fig, use_container_width=True)
 
-# ======================
-# Análisis Cuantitativo
-# ======================
-st.subheader("📐 Análisis Cuantitativo")
+# ======================================================
+# ANÁLISIS CUANTITATIVO
+# ======================================================
+elif section == "Análisis Cuantitativo":
+    st.subheader("📐 Análisis Cuantitativo")
 
-num_col = st.selectbox(
-    "Variable numérica",
-    numeric_cols
-)
+    if not numeric_cols:
+        st.warning("No hay variables numéricas disponibles")
+        st.stop()
 
-stats = df[num_col].describe().to_frame("Valor")
-st.dataframe(stats, use_container_width=True)
-
-# ======================
-# Análisis Gráfico
-# ======================
-st.subheader("📊 Análisis Gráfico Interactivo")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    fig = px.histogram(
-        df,
-        x=num_col,
-        nbins=30,
-        marginal="box",
-        title=f"Histograma de {num_col}"
+    num_col = st.selectbox(
+        "Variable numérica",
+        numeric_cols
     )
-    st.plotly_chart(fig, use_container_width=True)
 
-with col2:
-    fig = px.box(
-        df,
-        y=num_col,
-        title=f"Boxplot de {num_col}"
+    series = df[num_col].dropna()
+
+    stats = pd.DataFrame({
+        "Métrica": [
+            "Media", "Mediana", "Desv. estándar",
+            "Mínimo", "Máximo",
+            "Asimetría", "Curtosis"
+        ],
+        "Valor": [
+            series.mean(),
+            series.median(),
+            series.std(),
+            series.min(),
+            series.max(),
+            series.skew(),
+            series.kurtosis()
+        ]
+    })
+
+    st.dataframe(stats, use_container_width=True)
+
+# ======================================================
+# ANÁLISIS CUANTITATIVO GRÁFICO
+# ======================================================
+elif section == "Análisis Cuantitativo Gráfico":
+    st.subheader("📊 Análisis Cuantitativo Gráfico")
+
+    if not numeric_cols:
+        st.warning("No hay variables numéricas disponibles")
+        st.stop()
+
+    selected = st.selectbox(
+        "Variable",
+        numeric_cols
     )
-    st.plotly_chart(fig, use_container_width=True)
 
-# ======================
-# Scatter y correlación
-# ======================
-if len(numeric_cols) > 1:
-    st.divider()
-    st.subheader("🔗 Relación entre variables")
+    col1, col2 = st.columns(2)
 
-    x_var = st.selectbox("Variable X", numeric_cols, index=0)
-    y_var = st.selectbox("Variable Y", numeric_cols, index=1)
+    with col1:
+        fig = px.histogram(
+            df,
+            x=selected,
+            nbins=30,
+            marginal="box",
+            title=f"Histograma de {selected}"
+        )
+        st.plotly_chart(fig, use_container_width=True)
 
-    fig = px.scatter(
-        df,
-        x=x_var,
-        y=y_var,
-        trendline="ols",
-        title=f"{x_var} vs {y_var}"
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    with col2:
+        fig = px.box(
+            df,
+            y=selected,
+            title=f"Boxplot de {selected}"
+        )
+        st.plotly_chart(fig, use_container_width=True)
 
-    corr = df[numeric_cols].corr()
+    if len(numeric_cols) > 1:
+        st.divider()
+        st.subheader("🔗 Relación entre variables")
 
-    fig, ax = plt.subplots(figsize=(10, 6))
-    sns.heatmap(
-        corr,
-        annot=True,
-        cmap="coolwarm",
-        fmt=".2f",
-        ax=ax
-    )
-    st.pyplot(fig)
+        x = st.selectbox("Eje X", numeric_cols, index=0)
+        y = st.selectbox("Eje Y", numeric_cols, index=1)
+
+        fig = px.scatter(
+            df,
+            x=x,
+            y=y,
+            trendline="ols",
+            title=f"{x} vs {y}"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        corr = df[numeric_cols].corr()
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+        sns.heatmap(
+            corr,
+            annot=True,
+            cmap="coolwarm",
+            fmt=".2f",
+            ax=ax
+        )
+        st.pyplot(fig)
