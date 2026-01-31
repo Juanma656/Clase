@@ -4,19 +4,19 @@ import numpy as np
 import plotly.express as px
 import seaborn as sns
 import matplotlib.pyplot as plt
-from openai import OpenAI
+from groq import Groq
 import json
 
 # ======================================================
 # Configuración general
 # ======================================================
 st.set_page_config(
-    page_title="EDA Dashboard Universal + IA",
+    page_title="EDA Dashboard Universal + IA (Groq)",
     layout="wide"
 )
 
 st.title("📊 Dashboard EDA Universal + Asistente IA")
-st.caption("Explora cualquier dataset de forma interactiva y asistida por IA")
+st.caption("Explora cualquier dataset de forma interactiva y asistida por IA (Groq + LLaMA 3.3)")
 
 # ======================================================
 # Sidebar – Carga de datos
@@ -42,6 +42,7 @@ def safe_load(file):
         # Limpieza mínima
         df = df.dropna(axis=1, how="all")
         return df, None
+
     except Exception as e:
         return None, str(e)
 
@@ -50,6 +51,7 @@ if uploaded_file is None:
     st.stop()
 
 df, error = safe_load(uploaded_file)
+
 if error:
     st.error("❌ Error al cargar el archivo")
     st.code(error)
@@ -61,6 +63,7 @@ if error:
 st.sidebar.header("🎛️ Controles de análisis")
 
 max_rows = len(df)
+
 n_rows = st.sidebar.slider(
     "Cantidad de muestras a analizar",
     min_value=min(10, max_rows),
@@ -191,7 +194,7 @@ if show_corr and len(numeric_cols) > 1:
 # ASISTENTE IA – GROQ + LLAMA 3.3
 # ======================================================
 st.sidebar.divider()
-st.sidebar.header("🤖 Asistente de Análisis IA")
+st.sidebar.header("🤖 Asistente de Análisis IA (Groq)")
 
 groq_api_key = st.sidebar.text_input(
     "Groq API Key",
@@ -202,20 +205,21 @@ enable_ai = st.sidebar.checkbox("Activar asistente IA", False)
 
 def run_groq_analysis(api_key, df_context):
     try:
-        client = OpenAI(
-            api_key=api_key,
-            base_url="https://api.groq.com/openai/v1"
-        )
+        client = Groq(api_key=api_key)
 
         summary = {
             "shape": df_context.shape,
             "columns": list(df_context.columns),
-            "numeric_summary": df_context.select_dtypes(include=np.number)
-            .describe()
-            .round(2)
-            .to_dict(),
+            "numeric_summary": df_context
+                .select_dtypes(include=np.number)
+                .describe()
+                .round(2)
+                .to_dict(),
             "categorical_summary": {
-                col: df_context[col].value_counts().head(5).to_dict()
+                col: df_context[col]
+                    .value_counts()
+                    .head(5)
+                    .to_dict()
                 for col in df_context.select_dtypes(
                     include=["object", "category", "bool"]
                 ).columns
@@ -224,34 +228,41 @@ def run_groq_analysis(api_key, df_context):
 
         prompt = f"""
 Eres un analista de datos senior.
+
 Analiza el siguiente resumen de un dataset y entrega:
 
 1. Insights clave
 2. Patrones relevantes
-3. Posibles problemas de calidad
+3. Posibles problemas de calidad de datos
 4. Recomendaciones de análisis o negocio
 
 Resumen del dataset:
 {json.dumps(summary, indent=2)}
 """
 
-        response = client.chat.completions.create(
+        completion = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
-                {"role": "system", "content": "Eres un experto en análisis exploratorio de datos."},
-                {"role": "user", "content": prompt}
+                {
+                    "role": "system",
+                    "content": "Eres un experto en análisis exploratorio de datos."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
             ],
             temperature=0.3,
             max_tokens=900
         )
 
-        return response.choices[0].message.content
+        return completion.choices[0].message.content
 
     except Exception as e:
         return f"❌ Error en el asistente IA:\n{str(e)}"
 
 # ======================================================
-# UI del asistente
+# UI del asistente IA
 # ======================================================
 st.divider()
 st.subheader("🤖 Asistente Inteligente de Análisis")
